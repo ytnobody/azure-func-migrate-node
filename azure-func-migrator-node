@@ -1,0 +1,107 @@
+const glob = require('glob').sync;
+const find = require('find-in-files').findSync;
+const exec = require('child-process-promise').exec;
+const fs   = require('fs');
+const keys = Object.keys;
+
+// checkRequiredExtensions - 
+const checkRequiredExtensions = path => {
+    return glob(path).map(async target => {
+        var results = await find('"type"', target, "function.json$");
+        var [file] = keys(results);
+        if (file !== undefined) {
+            var types = {};
+            results[file].line.forEach(l => {
+                var [_, type] = l.split(":");
+                type = type.replace(/",?/g, "").replace(/ /g, "");
+                types[type] = true;
+            });
+            return keys(types);
+        } else {
+            return null;
+        }
+    });
+};
+
+const editJSON = (file, callback) => {
+    fs.exists(file, isExists => {
+        if (isExists === true) {
+            fs.readFile(file, (err, data) => {
+                if (err) console.error('File read error: ', err);
+                else {
+                    var json = JSON.parse(data);
+                    var updated = callback(json)
+                    fs.writeFileSync(file, JSON.stringify(updated, 2, 2));
+                    console.log(`File ${file} updated.`)
+                }
+            });
+        }
+    });
+};
+
+const replaceFunctionJsonForCosomsDB = (path) => {
+    glob(path + 'function.json').forEach(file => {
+        editJSON(file, json => {
+            json.bindings.filter(b => b.type.match("documentDB"))
+            .forEach(b =>{
+                b.type = b.type.replace("documentDB", "cosmosDB");
+                b.connectionStringSetting = b.connection;
+                delete b.connection;
+            });
+            return json;
+        });
+    });
+};
+
+const specifyRuntimeVersion = (newVersion) => {
+    var file = 'host.json';
+    editJSON(file, json => {
+        json.version = newVersion;
+        return json;
+    });
+};
+
+const extensionMap = {
+    storage:    {package: "Microsoft.Azure.WebJobs.Extensions.Storage",    version: "3.*"},
+    eventGrid:  {package: "Microsoft.Azure.WebJobs.Extensions.EventGrid",  version: "2.*"},
+    eventHub:   {package: "Microsoft.Azure.WebJobs.Extensions.EventHubs",  version: "3.*"},
+    documentDB: {package: "Microsoft.Azure.WebJobs.Extensions.CosmosDB",   version: "3.*"},
+    sendGrid:   {package: "Microsoft.Azure.WebJobs.Extensions.SendGrid",   version: "3.*"},
+    serviceBus: {package: "Microsoft.Azure.WebJobs.Extensions.ServiceBus", version: "3.*"},
+    twilioSms:  {package: "Microsoft.Azure.WebJobs.Extensions.Twilio",     version: "3.*"},
+};
+
+const targetPath = "./*/"
+
+var promises = checkRequiredExtensions(targetPath);
+
+Promise.all(promises).then(rows => {
+    var typesMap = {};
+    rows.filter(r => r !== null)
+        .map(r => r.join(','))
+        .join(',')
+        .split(',')
+        .map(type => type.replace("Trigger", ""))
+        .map(type => type.replace(/(table|queue|blob)/, "storage"))
+        .forEach(type => typesMap[type] = true);
+    
+    const extensions = keys(typesMap).map(type => extensionMap[type]).filter(ex => ex !== undefined);
+
+    exec('func init --worker-runtime=node')
+    .then(result => {
+        extensions.forEach(e => {
+            console.log(`Extension: ${e.package} v${e.version} installing...`);
+            exec(`func extensions install --package ${e.package} --version ${e.version}`)
+            .then(res => {
+                console.log(`Extension: ${e.package} v${e.version} installed.`);
+                if (e.package === "Microsoft.Azure.WebJobs.Extensions.CosmosDB") {
+                    replaceFunctionJsonForCosomsDB(targetPath);
+                }
+            })
+            .catch(err => console.error('Extension failure:', err));
+        });
+        specifyRuntimeVersion("2.0");
+    })
+    .catch(err => console.error('ERROR: ', err));
+
+});
