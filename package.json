@@ -2,7 +2,7 @@
   "name": "azure-func-migrator-node",
   "version": "0.0.1",
   "description": "migrate node.js based Azure Functions app from v1.x to 2.x",
-  "main": "azure-func-migrator-node",
+  "main": "azure-func-migrate-node",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
