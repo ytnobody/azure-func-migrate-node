@@ -5,6 +5,6 @@ WIP: Azure functions v1 -> v2 for Node.js applications
 
 ```
 cd your-func-app-v1
-node /path/to/azure-func-migrate-node
+node /path/to/azure-func-migrator-node
 ```
 
